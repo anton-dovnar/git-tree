@@ -29,7 +29,6 @@ func collectCommits(repoPath string, repo *git.Repository, all bool) (
 	children := make(map[plumbing.Hash]mapset.Set[plumbing.Hash])
 	toProcess := mapset.NewSet[plumbing.Hash]()
 
-	// Collect initial refs (local heads and tags)
 	refIter, err := repo.References()
 	if err != nil {
 		log.Printf("Error reading references: %v", err)
@@ -43,7 +42,6 @@ func collectCommits(repoPath string, repo *git.Repository, all bool) (
 		case name.IsBranch():
 			toProcess.Add(ref.Hash())
 		case name.IsTag():
-			// Resolve annotated or lightweight tag
 			obj, err := repo.TagObject(ref.Hash())
 			if err == nil {
 				if commit, err := obj.Commit(); err == nil {
@@ -53,13 +51,11 @@ func collectCommits(repoPath string, repo *git.Repository, all bool) (
 			}
 			toProcess.Add(ref.Hash()) // fallback for lightweight tag
 		case all && name.IsRemote():
-			// If all=True, include remote refs
 			toProcess.Add(ref.Hash())
 		}
 		return nil
 	})
 
-	// Iteratively walk the commit graph (avoid recursion)
 	for toProcess.Cardinality() > 0 {
 		current, ok := toProcess.Pop()
 		if !ok {
@@ -88,9 +84,6 @@ func collectCommits(repoPath string, repo *git.Repository, all bool) (
 		}
 	}
 
-	// Associate reflog references:
-	// label commits based on reflog entries for local heads; and, when all=true,
-	// label untracked remote refs (excluding */HEAD).
 	gitDir, err := structs.ResolveGitDir(repoPath)
 	if err != nil {
 		log.Printf("Could not resolve git dir for reflogs (%s): %v", repoPath, err)
@@ -113,7 +106,6 @@ func collectCommits(repoPath string, repo *git.Repository, all bool) (
 	refIter2.ForEach(func(ref *plumbing.Reference) error {
 		refName := ref.Name().String()
 
-		// local branch heads
 		if ref.Name().IsBranch() {
 			hashes, err := structs.ReadReflogNewHashes(gitDir, refName)
 			if err != nil {
@@ -127,9 +119,7 @@ func collectCommits(repoPath string, repo *git.Repository, all bool) (
 			return nil
 		}
 
-		// remote refs (only when all=true)
 		if all && ref.Name().IsRemote() {
-			// Ignore remote/HEAD and tracked remote refs
 			if strings.HasSuffix(refName, "/HEAD") {
 				return nil
 			}
@@ -174,7 +164,6 @@ func getRefs(repo *git.Repository, all bool) (
 			heads[hash] = append(heads[hash], ref)
 
 		case name.IsTag():
-			// For tags, try resolving annotated tags to commits
 			obj, err := repo.TagObject(ref.Hash())
 			if err == nil {
 				if commit, err := obj.Commit(); err == nil {
@@ -182,7 +171,6 @@ func getRefs(repo *git.Repository, all bool) (
 					return nil
 				}
 			}
-			// Lightweight tag fallback (direct commit)
 			tags[ref.Hash()] = append(tags[ref.Hash()], ref)
 
 		case all && name.IsRemote():
@@ -206,9 +194,7 @@ func arrangeCommits(
 		Ci   *structs.CommitInfo
 	}
 
-	// --- Chrono-topological sort (ctsort) ---
 	ctsort := func() []commitPair {
-		// sorted by committed_date
 		sortedCommits := make([]commitPair, 0, len(commits))
 		for h, ci := range commits {
 			if ci != nil && ci.Commit != nil {
@@ -219,7 +205,6 @@ func arrangeCommits(
 			return sortedCommits[i].Ci.Commit.Committer.When.Before(sortedCommits[j].Ci.Commit.Committer.When)
 		})
 
-		// parents: map[hash] -> set of parent hashes
 		parents := make(map[plumbing.Hash]mapset.Set[plumbing.Hash], len(commits))
 		for h, ci := range commits {
 			ps := mapset.NewSet[plumbing.Hash]()
@@ -236,18 +221,15 @@ func arrangeCommits(
 			i := 0
 			for {
 				if i >= len(sortedCommits) {
-					// If no parent-free node found (shouldn't happen for a DAG), append remainder to result
 					result = append(result, sortedCommits...)
 					sortedCommits = sortedCommits[:0]
 					break
 				}
 				h := sortedCommits[i].Hash
 				if parents[h].Cardinality() == 0 {
-					// pop i
 					c := sortedCommits[i]
 					sortedCommits = append(sortedCommits[:i], sortedCommits[i+1:]...)
 					result = append(result, c)
-					// remove h from parents of its children
 					if cs, ok := children[h]; ok {
 						for child := range cs.Iter() {
 							if ps, ok := parents[child]; ok {
@@ -263,21 +245,17 @@ func arrangeCommits(
 		return result
 	}
 
-	// --- Helper: determine if a ref is a "head" (branch head) ---
 	isHeadRef := func(r *plumbing.Reference) bool {
 		if r == nil {
 			return false
 		}
 		name := r.Name().String()
-		// Approximate by branch heads.
 		return len(name) >= len("refs/heads/") && name[:len("refs/heads/")] == "refs/heads/"
 	}
 
-	// --- Build head_children and children_head ---
 	buildHeadChildren := func() (map[plumbing.Hash]mapset.Set[plumbing.Hash], map[plumbing.Hash]mapset.Set[plumbing.Hash]) {
 		headChildren := make(map[plumbing.Hash]mapset.Set[plumbing.Hash])
 		for h, refSlice := range heads {
-			// include only heads where there is at least one Head reference
 			hasHead := false
 			for _, r := range refSlice {
 				if isHeadRef(r) {
@@ -310,8 +288,6 @@ func arrangeCommits(
 		return headChildren, childrenHead
 	}
 
-	// --- gap(refs=True/False) ---
-	// Tracked levels are the values of refsLevels (map[string]int)
 	gap := func(refsLevels map[string]int, refs bool) int {
 		if len(refsLevels) == 0 {
 			if refs {
@@ -336,32 +312,24 @@ func arrangeCommits(
 		return levels[len(levels)-1] + 1
 	}
 
-	// --- Execute ctsort ---
 	sortedCommits := ctsort()
 	if len(sortedCommits) == 0 {
 		return nil
 	}
 
-	// Initial commit
 	first := sortedCommits[0]
 	h0 := first.Hash
 	initialRefs := first.Ci.References
-
-	// Map head commits with their children and reverse map
 	headChildren, childrenHead := buildHeadChildren()
-
-	// Track branch heights/levels
 	refsLevels := make(map[string]int)
 	for ref := range initialRefs.Iter() {
 		refsLevels[ref] = 0
 	}
 	seenHeads := mapset.NewSet[plumbing.Hash]()
 
-	// Locations map: commit -> (x, y)
 	locations := make(map[plumbing.Hash][2]int, len(sortedCommits))
 	locations[h0] = [2]int{0, 0}
 
-	// For remaining commits
 	for i := 0; i < len(sortedCommits)-1; i++ {
 		curPair := sortedCommits[i+1]
 		h := curPair.Hash
@@ -371,15 +339,12 @@ func arrangeCommits(
 
 		x := -1
 
-		// active refs are keys of refsLevels
 		activeRefs := mapset.NewSet[string]()
 		for r := range refsLevels {
 			activeRefs.Add(r)
 		}
 
-		// Case 1: commit has no refs
 		if refs == nil || refs.Cardinality() == 0 {
-			// position of the lowest parent
 			type pxPair struct {
 				parent plumbing.Hash
 				x      int
@@ -396,7 +361,6 @@ func arrangeCommits(
 				p := parentPositions[0].parent
 				x = parentPositions[0].x
 
-				// future_children = children[p] ∩ {h for h, _ in sorted_commits[i+2:]}
 				futureChildren := mapset.NewSet[plumbing.Hash]()
 				if cs, ok := children[p]; ok {
 					remaining := mapset.NewSet[plumbing.Hash]()
@@ -410,27 +374,18 @@ func arrangeCommits(
 					}
 				}
 				if futureChildren.Cardinality() > 0 {
-					// use gap(refs=False)
 					x = gap(refsLevels, false)
 				}
 			} else {
-				// No parents known: place at a gap for non-ref case
 				x = gap(refsLevels, false)
 			}
 
 		} else if refs.Intersect(activeRefs).Cardinality() == 0 {
-			// Case 2: commit has new refs only
 			x = gap(refsLevels, true)
 
 		} else {
-			// Case 3: commit has tracked refs
 			px := make(map[plumbing.Hash]int)
-			// m = max level value
-			// We'll keep logic parity without relying on m.
-
 			currentRefs := refs.Intersect(activeRefs) // current tracked refs on this commit
-
-			// Precompute reverse: level -> set of refs currently tracked at that level
 			levelRefs := make(map[int]mapset.Set[string])
 			for r, lvl := range refsLevels {
 				rs := levelRefs[lvl]
@@ -454,20 +409,14 @@ func arrangeCommits(
 
 				xForParent := -1
 
-				// If current_refs >= (parent_refs & active_refs) then reuse parent level.
-				// Set-wise: parentTracked ⊆ currentRefs.
 				if parentTracked.IsSubset(currentRefs) {
 					if pos, ok := locations[p]; ok {
 						xForParent = pos[0]
 					}
 				} else {
-					// elif any(levelRefs[i] ∩ current_refs) < (parent_refs ∩ active_refs) for i in levels:
-					// meaning: at each tracked level, the set of current refs present at that level
-					// is a proper subset of parent's tracked refs.
 					diverged := false
 					for _, lr := range levelRefs {
 						curAtLevel := lr.Intersect(currentRefs)
-						// proper subset: curAtLevel < parentTracked
 						if curAtLevel.IsSubset(parentTracked) && !parentTracked.IsSubset(curAtLevel) {
 							diverged = true
 							break
@@ -475,7 +424,6 @@ func arrangeCommits(
 					}
 
 					if diverged {
-						// try lowest ref level among current refs
 						minX := -1
 						for r := range currentRefs.Iter() {
 							if lvl, ok := refsLevels[r]; ok {
@@ -489,7 +437,6 @@ func arrangeCommits(
 						}
 						xForParent = minX
 
-						// if x == parent level and parent has multiple children, need a new level
 						if pos, ok := locations[p]; ok {
 							if xForParent == pos[0] {
 								childCount := 0
@@ -502,12 +449,10 @@ func arrangeCommits(
 							}
 						}
 					} else if parentTracked.Cardinality() == 0 {
-						// parent has no refs: use parent level
 						if pos, ok := locations[p]; ok {
 							xForParent = pos[0]
 						}
 					} else {
-						// elif any(levelRefs[i] ∩ current_refs == current_refs) for i in levels:
 						reuseTracked := false
 						for _, lr := range levelRefs {
 							curAtLevel := lr.Intersect(currentRefs)
@@ -517,7 +462,6 @@ func arrangeCommits(
 							}
 						}
 						if reuseTracked {
-							// use the level of any one current ref
 							for r := range currentRefs.Iter() {
 								if lvl, ok := refsLevels[r]; ok {
 									xForParent = lvl
@@ -537,7 +481,6 @@ func arrangeCommits(
 				px[p] = xForParent
 			}
 
-			// Choose minimum x across parents
 			if len(px) > 0 {
 				min := -1
 				for _, v := range px {
@@ -551,7 +494,6 @@ func arrangeCommits(
 					x = gap(refsLevels, true)
 				}
 			} else {
-				// No valid parent info; place at a gap
 				x = gap(refsLevels, true)
 			}
 		}
@@ -562,17 +504,13 @@ func arrangeCommits(
 
 		locations[h] = [2]int{x, len(locations)}
 
-		// Update levels of tracked refs
 		for r := range refs.Iter() {
 			refsLevels[r] = x
 		}
 
-		// Head/children bookkeeping
 		if _, ok := heads[h]; ok {
-			// Mark the head for untracking
 			seenHeads.Add(h)
 		} else if ch, ok := childrenHead[h]; ok {
-			// Remove the child from the set of children of all its parent heads
 			for head := range ch.Iter() {
 				if set, ok2 := headChildren[head]; ok2 {
 					set.Remove(h)
@@ -580,7 +518,6 @@ func arrangeCommits(
 			}
 		}
 
-		// Untrack seen heads: remove their refs from refsLevels
 		for _, head := range seenHeads.ToSlice() {
 			seenHeads.Remove(head) // Head in set(seen_heads): seen_heads.remove(head)
 			if refSlice, ok := heads[head]; ok {
@@ -618,7 +555,6 @@ func saveLocationsToFile(locations map[plumbing.Hash][2]int, filename string) er
 	return os.WriteFile(filename, jsonData, 0644)
 }
 
-// getGitHubSlug attempts to extract GitHub repository slug from remotes
 func getGitHubSlug(repo *git.Repository) string {
 	remotes, err := repo.Remotes()
 	if err != nil {
@@ -628,12 +564,9 @@ func getGitHubSlug(repo *git.Repository) string {
 	for _, remote := range remotes {
 		for _, url := range remote.Config().URLs {
 			if strings.Contains(url, "github.com") {
-				// Extract slug from URL like https://github.com/owner/repo.git
-				// or git@github.com:owner/repo.git
 				url = strings.TrimSuffix(url, ".git")
 				if idx := strings.Index(url, "github.com/"); idx >= 0 {
 					slug := url[idx+len("github.com/"):]
-					// Handle SSH format git@github.com:owner/repo
 					if strings.HasPrefix(slug, ":") {
 						slug = slug[1:]
 					}
@@ -673,21 +606,15 @@ func main() {
 		log.Printf("Could not save locations to %s: %v", *locationsOut, err)
 	}
 
-	// Generate HTML if requested
 	if *htmlOut != "" {
-		// Get GitHub slug for issue linking
 		ghSlug := getGitHubSlug(repo)
-
-		// Generate commit data
 		commitData := view.GenerateCommitData(commits, ghSlug)
 
-		// Generate SVG as string
 		svgString, err := view.GenerateSVGString(commits, positions, heads, tags, children)
 		if err != nil {
 			log.Fatalf("Failed to generate SVG: %v", err)
 		}
 
-		// Determine title (use repository directory name)
 		title := *repoPath
 		if title == "." {
 			wd, err := os.Getwd()
@@ -700,7 +627,6 @@ func main() {
 			title = title[idx+1:]
 		}
 
-		// Write HTML file
 		htmlFile, err := os.Create(*htmlOut)
 		if err != nil {
 			log.Fatalf("Failed to create HTML file %s: %v", *htmlOut, err)
@@ -715,7 +641,6 @@ func main() {
 		log.Printf("✨ HTML generated: file://%s", absPath)
 	}
 
-	// Output SVG to stdout if not in HTML-only mode
 	if !*noSVG && (*htmlOut == "" || !*htmlOnly) {
 		canvas := svg.New(os.Stdout)
 		view.DrawRailway(canvas, commits, positions, heads, tags, children)

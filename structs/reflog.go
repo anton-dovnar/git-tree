@@ -11,12 +11,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
-// ResolveGitDir attempts to resolve the repository's git directory.
-//
-// It supports:
-// - standard repos where ".git" is a directory
-// - worktrees/submodules where ".git" is a file containing "gitdir: <path>"
-// - being called from any subdirectory of the repo (walks parents)
 func ResolveGitDir(startPath string) (string, error) {
 	if startPath == "" {
 		return "", errors.New("empty path")
@@ -30,7 +24,6 @@ func ResolveGitDir(startPath string) (string, error) {
 			if fi.IsDir() {
 				return dotgit, nil
 			}
-			// .git is a file: read "gitdir: <path>"
 			b, rerr := os.ReadFile(dotgit)
 			if rerr != nil {
 				return "", fmt.Errorf("read %s: %w", dotgit, rerr)
@@ -59,11 +52,6 @@ func ResolveGitDir(startPath string) (string, error) {
 	return "", fmt.Errorf("could not find .git starting at %s", startPath)
 }
 
-// ReadReflogNewHashes reads reflog entries for a ref and returns the new hashes
-// in file order. Missing reflog files return (nil, nil).
-//
-// refName is expected to be a full ref name like "refs/heads/main" or
-// "refs/remotes/origin/feature".
 func ReadReflogNewHashes(gitDir, refName string) ([]plumbing.Hash, error) {
 	if gitDir == "" || refName == "" {
 		return nil, errors.New("empty gitDir or refName")
@@ -86,7 +74,6 @@ func ReadReflogNewHashes(gitDir, refName string) ([]plumbing.Hash, error) {
 		if line == "" {
 			continue
 		}
-		// Format: <old> <new> <author> <timestamp> <tz>\t<message>
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -111,11 +98,6 @@ func ReadReflogNewHashes(gitDir, refName string) ([]plumbing.Hash, error) {
 	return out, nil
 }
 
-// TrackedRemoteRefs returns the set of remote refs tracked by local branches,
-// e.g. "refs/remotes/origin/main".
-//
-// This excluding tracked remote refs from the
-// "extra remote reflog labelling" when --all is enabled.
 func TrackedRemoteRefs(gitDir string) (map[string]struct{}, error) {
 	out := make(map[string]struct{})
 	if gitDir == "" {
@@ -148,7 +130,6 @@ func TrackedRemoteRefs(gitDir string) (map[string]struct{}, error) {
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			curBranch = ""
 			sec := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
-			// Example: branch "main"
 			if strings.HasPrefix(sec, "branch ") {
 				rest := strings.TrimSpace(strings.TrimPrefix(sec, "branch "))
 				rest = strings.Trim(rest, `"`)
