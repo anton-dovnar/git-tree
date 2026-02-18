@@ -40,6 +40,8 @@ window.addEventListener('mouseover', (e) => {
         infobox.style.top = Math.min(e.clientY, maxY) + "px";
         infobox.style.left = e.clientX + 12 + "px";
         showCommitInfo(e.target);
+    } else if (e.target.closest && e.target.closest("#infobox")) {
+        if (infoboxTimer != null) { clearTimeout(infoboxTimer); infoboxTimer = null; }
     } else {
         hideCommitInfo();
     }
