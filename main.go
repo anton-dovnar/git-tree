@@ -577,38 +577,36 @@ func main() {
 	positions := arrangeCommits(commits, heads, children)
 	log.Printf("Arranged %d commits", len(positions))
 
-	if *htmlOut != "" {
-		ghSlug := getGitHubSlug(repo)
-		commitData := view.GenerateCommitData(commits, ghSlug)
+	ghSlug := getGitHubSlug(repo)
+	commitData := view.GenerateCommitData(commits, ghSlug)
 
-		svgString, err := view.GenerateSVGString(commits, positions, heads, tags, children)
-		if err != nil {
-			log.Fatalf("Failed to generate SVG: %v", err)
-		}
-
-		title := *repoPath
-		if title == "." {
-			wd, err := os.Getwd()
-			if err == nil {
-				title = wd
-			}
-		}
-		title = strings.TrimSuffix(title, "/")
-		if idx := strings.LastIndex(title, "/"); idx >= 0 {
-			title = title[idx+1:]
-		}
-
-		htmlFile, err := os.Create(*htmlOut)
-		if err != nil {
-			log.Fatalf("Failed to create HTML file %s: %v", *htmlOut, err)
-		}
-		defer htmlFile.Close()
-
-		if err := view.WriteHTML(htmlFile, svgString, commitData, title); err != nil {
-			log.Fatalf("Failed to write HTML: %v", err)
-		}
-
-		absPath, _ := filepath.Abs(*htmlOut)
-		log.Printf("✨ HTML generated: file://%s", absPath)
+	svgString, err := view.GenerateSVGString(commits, positions, heads, tags, children)
+	if err != nil {
+		log.Fatalf("Failed to generate SVG: %v", err)
 	}
+
+	title := *repoPath
+	if title == "." {
+		wd, err := os.Getwd()
+		if err == nil {
+			title = wd
+		}
+	}
+	title = strings.TrimSuffix(title, "/")
+	if idx := strings.LastIndex(title, "/"); idx >= 0 {
+		title = title[idx+1:]
+	}
+
+	htmlFile, err := os.Create(*htmlOut)
+	if err != nil {
+		log.Fatalf("Failed to create HTML file %s: %v", *htmlOut, err)
+	}
+	defer htmlFile.Close()
+
+	if err := view.WriteHTML(htmlFile, svgString, commitData, title); err != nil {
+		log.Fatalf("Failed to write HTML: %v", err)
+	}
+
+	absPath, _ := filepath.Abs(*htmlOut)
+	log.Printf("✨ HTML generated: file://%s", absPath)
 }
