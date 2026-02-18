@@ -192,7 +192,7 @@ func (sr *SVGRailway) Rail(x, y, px, py int, colors []color.RGBA, middle bool) {
 func (sr *SVGRailway) Stop(x, y int, c color.RGBA, commit SVGCommit) {
 	cx := paddingX + x*stepX
 	cy := paddingY + y*stepY
-	sr.Circle(cx, cy, stopR, fmt.Sprintf(`class="stop" fill="%s" id="%s"`, colorToHex(c), commit.Hash))
+	sr.Circle(cx, cy, stopR, fmt.Sprintf(`class="stop" fill="%s" id="%s" tabindex="0" role="button"`, colorToHex(c), commit.Hash))
 	sr.addLabels(x, y, commit)
 }
 
