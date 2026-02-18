@@ -9,6 +9,10 @@ html, body {
   background-color: #4e545b;
 }
 
+svg {
+  width: 100%;
+}
+
 #app {
     display: flex;
     flex-direction: row;
