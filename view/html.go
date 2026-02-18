@@ -19,6 +19,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 )
 
+//go:embed resources/*
 var resources embed.FS
 
 type CommitMessage struct {
