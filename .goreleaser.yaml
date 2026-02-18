@@ -92,7 +92,7 @@ homebrew_casks:
       verified: "github.com/anton-dovnar/git-tree"
     repository:
       owner: anton-dovnar
-      name: git-tree
+      name: homebrew-git-tree
     hooks:
       post:
         install: |
