@@ -19,14 +19,26 @@ builds:
     goos:
       - linux
       - windows
-      - darwin
     goarch:
       - amd64
       - arm64
       - 386
+  - id: git-tree-darwin
+    main: .
+    binary: git-tree
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
 
 archives:
   - id: default
+    ids:
+      - git-tree
+      - git-tree-darwin
     format_overrides:
       - goos: windows
         formats: [zip]
@@ -37,6 +49,16 @@ archives:
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+  - id: homebrew
+    ids:
+      - git-tree-darwin
+    formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
 
@@ -57,3 +79,23 @@ release:
   footer: |-
     ---
     Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
+
+homebrew_casks:
+  - name: git-tree
+    ids:
+      - homebrew
+    binaries:
+      - git-tree
+    homepage: "https://github.com/anton-dovnar/git-tree"
+    description: "Visualize a git repository’s commit history as an interactive graph."
+    url:
+      verified: "github.com/anton-dovnar/git-tree"
+    repository:
+      owner: anton-dovnar
+      name: homebrew-git-tree
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/git-tree"]
+          end
